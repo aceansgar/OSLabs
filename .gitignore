@@ -2,10 +2,14 @@
 
 !.gitignore
 
+!lab1_wx/
+lab1_wx/*
 !lab1_wx/linker.cpp
 !lab1_wx/Makefile
 !lab1_wx/README.txt
 
+!lab2_wx/
+lab2_wx/*
 !lab2_wx/sched.cpp
 !lab2_wx/Makefile
 !lab2_wx/README.txt
