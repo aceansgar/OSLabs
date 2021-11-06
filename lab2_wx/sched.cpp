@@ -33,6 +33,7 @@ public:
     int static_priority_;
     int dynamic_priority_;
     int state_begin_t_;
+    process_state_t old_state_;
     process_state_t state_;
 
     Process(int _pid, int _at, int _tc, int _cb, int _io, int _maxprio);
@@ -50,6 +51,7 @@ public:
     virtual void add_ready_process(Process* _p);
     void add_expired_process(Process* _p);
     virtual Process* get_next_process();
+    virtual void add_inactive_process(Process* _p); // for PRIO
     // virtual bool test_preempt(Process* p, int curtime);
 };
 
@@ -88,6 +90,20 @@ public:
     SRTF_Scheduler(int _quantum);
     ~SRTF_Scheduler();
     void add_ready_process(Process* p);
+    Process* get_next_process();
+    // bool test_preempt(Process* p, int curtime);
+};
+
+class PRIO_Scheduler: public Scheduler
+{
+public:
+    int maxprio_; // levels
+    std::vector<std::queue<Process*>> ready_queues_;
+    std::vector<std::queue<Process*>> inactive_queues_;
+    PRIO_Scheduler(int _quantum, int _maxprio);
+    ~PRIO_Scheduler();
+    void add_ready_process(Process* _p);
+    void add_inactive_process(Process* _p);
     Process* get_next_process();
     // bool test_preempt(Process* p, int curtime);
 };
@@ -171,6 +187,7 @@ Process::Process(int _pid, int _at, int _tc, int _cb, int _io, int _maxprio)
     static_priority_ = myrandom(_maxprio);
     dynamic_priority_ = static_priority_ - 1;
     state_begin_t_ = _at;
+    old_state_ = CREATED;
     state_ = CREATED;
 }
 
@@ -215,6 +232,11 @@ void Scheduler::add_expired_process(Process* _p)
 Process* Scheduler::get_next_process()
 {
     return NULL;
+}
+
+void Scheduler::add_inactive_process(Process* _p)
+{
+
 }
 
 FCFS_Scheduler::FCFS_Scheduler(int _quantum):Scheduler(_quantum)
@@ -288,6 +310,53 @@ Process* SRTF_Scheduler::get_next_process()
     ready_queue_.pop();
     return p;
 }
+
+PRIO_Scheduler::PRIO_Scheduler(int _quantum, int _maxprio):Scheduler(_quantum)
+{
+    maxprio_ = _maxprio;
+    ready_queues_ = std::vector<std::queue<Process*>>(_maxprio, std::queue<Process*>());
+    inactive_queues_ = std::vector<std::queue<Process*>>(_maxprio, std::queue<Process*>());
+}
+
+PRIO_Scheduler::~PRIO_Scheduler()
+{
+
+}
+
+void PRIO_Scheduler::add_ready_process(Process* _p)
+{
+    // put into corresponding level
+    ready_queues_[_p->dynamic_priority_].push(_p);
+}
+
+void PRIO_Scheduler::add_inactive_process(Process* _p)
+{
+    inactive_queues_[_p->dynamic_priority_].push(_p);
+}
+
+Process* PRIO_Scheduler::get_next_process()
+{
+    for(int prio_level = maxprio_ - 1; prio_level >=0 ; -- prio_level)
+    {
+        if(ready_queues_[prio_level].empty())
+            continue;
+        Process* p = ready_queues_[prio_level].front();
+        ready_queues_[prio_level].pop();
+        return p;
+    }
+    ready_queues_ = inactive_queues_;
+    inactive_queues_ = std::vector<std::queue<Process*>>(maxprio_, std::queue<Process*>());
+    for(int prio_level = maxprio_ - 1; prio_level >=0 ; -- prio_level)
+    {
+        if(ready_queues_[prio_level].empty())
+            continue;
+        Process* p = ready_queues_[prio_level].front();
+        ready_queues_[prio_level].pop();
+        return p;
+    }
+    return NULL;
+}
+
 
 Event::Event(int _timestamp, Process* _proc_ptr, trans_type_t _trans_type)
 {
@@ -400,7 +469,13 @@ void read_schedule_config(int _argc, char** _argv)
             break;
         }
         case 'P':
+        {
+            sched_type = PRIO;
+            sscanf(param_str.substr(1).c_str(), "%d:%d", &quantum, &maxprio);
+            // printf("quantum: %d, maxprio: %d\n", quantum, maxprio);
+            sched_ptr = new PRIO_Scheduler(quantum, maxprio);
             break;
+        }
         case 'E':
             break;
     }
@@ -442,7 +517,6 @@ void read_inputfile(char* _path)
         // printf("pid:%d, AT:%d, TC:%d, CB:%d, IO:%d\n", line_id, AT, TC, CB, IO);
         Process* proc_ptr = new Process(line_id, AT, TC, CB, IO, maxprio);
         Event* event = new Event(AT, proc_ptr, TRANS_TO_READY);
-        proc_ptr->state_ = READY;
         des->put_event(event);
         ++ line_id;
     }
@@ -470,17 +544,21 @@ void Simulation()
                 // conditional on whether something is run
                 if(verbose)
                 {
-                    if((proc_ptr->state_)==CREATED)
+                    if((prev_state)==CREATED)
                         printf("%d %d %d: CREATED -> READY\n", curr_time, proc_ptr->pid_, 0);
                     else
                         printf("%d %d %d: BLOCK -> READY\n", curr_time, proc_ptr->pid_, prev_state_time);
                 }
+                proc_ptr -> old_state_ = proc_ptr -> state_;
                 proc_ptr -> state_ = READY;
                 proc_ptr -> state_begin_t_ = curr_time;
                 proc_ptr -> io_t_sum_ += prev_state_time;
-                proc_ptr -> dynamic_priority_ = proc_ptr-> static_priority_ - 1;
                 if_call_sched = true; 
+
+                // block/created -> ready 
+                proc_ptr -> dynamic_priority_ = proc_ptr-> static_priority_ - 1;
                 sched_ptr -> add_ready_process(proc_ptr);
+
                 // printf("ready process added\n");
                 break;
             }
@@ -491,6 +569,7 @@ void Simulation()
                 // printf("CB: %d\n", proc_ptr->CB_);
 #endif
                 curr_proc = proc_ptr;
+                proc_ptr -> old_state_ = proc_ptr -> state_;
                 proc_ptr -> state_ = RUNNING;
                 proc_ptr -> state_begin_t_ = curr_time;
                 int quantum = sched_ptr -> quantum_;
@@ -530,6 +609,7 @@ void Simulation()
                 //create an event for when process becomes READY again
                 curr_proc = NULL;
                 if_call_sched = true;
+                proc_ptr -> old_state_ = proc_ptr -> state_;
                 proc_ptr -> state_ = BLOCKED;
                 proc_ptr -> state_begin_t_ = curr_time;
                 proc_ptr -> cpuburst_remain_ = 0;
@@ -562,20 +642,36 @@ void Simulation()
                 // add to runqueue (no event is generated)
                 curr_proc = NULL;
                 if_call_sched = true;
+                proc_ptr -> old_state_ = proc_ptr -> state_;
                 proc_ptr -> state_ = READY;
                 proc_ptr -> state_begin_t_ = curr_time;
                 proc_ptr -> cpuburst_remain_ -= prev_state_time;
                 proc_ptr -> cpu_t_remain_ -= prev_state_time;
-                int new_dynamic_prio = proc_ptr -> dynamic_priority_ - 1;
-                if(new_dynamic_prio == -1)
-                    new_dynamic_prio = proc_ptr -> static_priority_ - 1;
-                proc_ptr -> dynamic_priority_ = new_dynamic_prio;
-                sched_ptr -> add_ready_process(proc_ptr);
+                
                 if(verbose)
                 {
                     printf("%d %d %d: RUNNG -> READY  cb=%d rem=%d prio=%d\n", \
                     curr_time, proc_ptr->pid_, prev_state_time, proc_ptr->cpuburst_remain_, proc_ptr->cpu_t_remain_, \
                     proc_ptr->dynamic_priority_);
+                }
+                int new_dynamic_prio = (proc_ptr -> dynamic_priority_) - 1;
+                if(new_dynamic_prio == -1)
+                {
+                    new_dynamic_prio = (proc_ptr -> static_priority_) - 1;
+                    proc_ptr -> dynamic_priority_ = new_dynamic_prio;
+                    if(sched_type == PRIO || sched_type == PREPRIO)
+                    {
+                        sched_ptr -> add_inactive_process(proc_ptr);
+                    }
+                    else
+                    {
+                        sched_ptr -> add_ready_process(proc_ptr);
+                    }
+                }
+                else
+                {
+                    proc_ptr -> dynamic_priority_ = new_dynamic_prio;
+                    sched_ptr -> add_ready_process(proc_ptr);
                 }
                 break;
             }
@@ -633,7 +729,7 @@ void final_output()
             printf("RR %d\n", sched_ptr->quantum_);
             break;
         case PRIO:
-            printf("PRIO\n");
+            printf("PRIO %d\n", sched_ptr->quantum_);
             break;
     }
     int last_finish_t=0;
