@@ -77,16 +77,16 @@ public:
     // bool test_preempt(Process* p, int curtime);
 };
 
-class SR_proc_comp 
-{
-public:
-    bool operator()(Process* _a, Process* _b){return (_a->cpu_t_remain_) > (_b->cpu_t_remain_);}
-};
+// class SR_proc_comp 
+// {
+// public:
+//     bool operator()(Process* _a, Process* _b){return (_a->cpu_t_remain_) > (_b->cpu_t_remain_);}
+// };
 
 class SRTF_Scheduler: public Scheduler
 {
 public:
-    std::priority_queue<Process*, std::vector<Process*>, SR_proc_comp> ready_queue_;
+    std::list<Process*> ready_list_;
     SRTF_Scheduler(int _quantum);
     ~SRTF_Scheduler();
     void add_ready_process(Process* p);
@@ -102,6 +102,20 @@ public:
     std::vector<std::queue<Process*>> inactive_queues_;
     PRIO_Scheduler(int _quantum, int _maxprio);
     ~PRIO_Scheduler();
+    void add_ready_process(Process* _p);
+    void add_inactive_process(Process* _p);
+    Process* get_next_process();
+    // bool test_preempt(Process* p, int curtime);
+};
+
+class PREPRIO_Scheduler: public Scheduler
+{
+public:
+    int maxprio_; // levels
+    std::vector<std::queue<Process*>> ready_queues_;
+    std::vector<std::queue<Process*>> inactive_queues_;
+    PREPRIO_Scheduler(int _quantum, int _maxprio);
+    ~PREPRIO_Scheduler();
     void add_ready_process(Process* _p);
     void add_inactive_process(Process* _p);
     Process* get_next_process();
@@ -138,8 +152,9 @@ public:
     void put_event(Event* _event_ptr);
     Event* get_event();
     int get_next_event_time();
-    void rm_event();
+    void rm_proc_event(int _pid);
     void print_events();
+    bool check_proc_curr_event(int _pid, int _t); //check current pending event of process
 };
 
 std::vector<int> randvals;
@@ -165,10 +180,10 @@ int main(int argc, char** argv)
     char* rand_path = argv[argc-1];
     read_rfile(rand_path);
     read_inputfile(input_path);
-    des->print_events();
-    printf("======begin simulation: \n");
+    // des->print_events();
+    // printf("======begin simulation: \n");
     Simulation();
-    printf("======begin final output: \n");
+    // printf("======begin final output: \n");
     final_output();
     delete des;
     return 0;
@@ -299,15 +314,28 @@ SRTF_Scheduler::~SRTF_Scheduler()
 
 void SRTF_Scheduler::add_ready_process(Process* _p)
 {
-    ready_queue_.push(_p);
+    if(ready_list_.empty())
+    {
+        ready_list_.push_back(_p);
+        return;
+    }
+    int remain_t = _p->cpu_t_remain_;
+    std::list<Process*>::iterator it;
+    for (it=ready_list_.begin(); it != ready_list_.end(); ++it)
+    {
+        int tmp_remain_t = (*it)->cpu_t_remain_;
+        if(remain_t < tmp_remain_t)
+            break;
+    }
+    ready_list_.insert(it, _p);
 }
 
 Process* SRTF_Scheduler::get_next_process()
 {
-    if(ready_queue_.empty())
+    if(ready_list_.empty())
         return NULL;
-    Process* p = ready_queue_.top();
-    ready_queue_.pop();
+    Process* p = ready_list_.front();
+    ready_list_.pop_front();
     return p;
 }
 
@@ -335,6 +363,52 @@ void PRIO_Scheduler::add_inactive_process(Process* _p)
 }
 
 Process* PRIO_Scheduler::get_next_process()
+{
+    for(int prio_level = maxprio_ - 1; prio_level >=0 ; -- prio_level)
+    {
+        if(ready_queues_[prio_level].empty())
+            continue;
+        Process* p = ready_queues_[prio_level].front();
+        ready_queues_[prio_level].pop();
+        return p;
+    }
+    ready_queues_ = inactive_queues_;
+    inactive_queues_ = std::vector<std::queue<Process*>>(maxprio_, std::queue<Process*>());
+    for(int prio_level = maxprio_ - 1; prio_level >=0 ; -- prio_level)
+    {
+        if(ready_queues_[prio_level].empty())
+            continue;
+        Process* p = ready_queues_[prio_level].front();
+        ready_queues_[prio_level].pop();
+        return p;
+    }
+    return NULL;
+}
+
+PREPRIO_Scheduler::PREPRIO_Scheduler(int _quantum, int _maxprio):Scheduler(_quantum)
+{
+    maxprio_ = _maxprio;
+    ready_queues_ = std::vector<std::queue<Process*>>(_maxprio, std::queue<Process*>());
+    inactive_queues_ = std::vector<std::queue<Process*>>(_maxprio, std::queue<Process*>());
+}
+
+PREPRIO_Scheduler::~PREPRIO_Scheduler()
+{
+
+}
+
+void PREPRIO_Scheduler::add_ready_process(Process* _p)
+{
+    // put into corresponding level
+    ready_queues_[_p->dynamic_priority_].push(_p);
+}
+
+void PREPRIO_Scheduler::add_inactive_process(Process* _p)
+{
+    inactive_queues_[_p->dynamic_priority_].push(_p);
+}
+
+Process* PREPRIO_Scheduler::get_next_process()
 {
     for(int prio_level = maxprio_ - 1; prio_level >=0 ; -- prio_level)
     {
@@ -416,15 +490,36 @@ int DES::get_next_event_time()
     return events_.front()->timestamp_;
 }
 
-
-void DES::rm_event()
+void DES::rm_proc_event(int _pid)
 {
-    
+    // future event of process <=1
+    std::list<Event*>::iterator it;
+    for(it = events_.begin(); it != events_.end(); ++ it)
+    {
+        Event* evt = *it;
+        if(evt->proc_ptr_->pid_ == _pid)
+            break;
+    }
+    if(it!= events_.end())
+        events_.erase(it);
 }
 
 void DES::print_events()
 {
     printf("%d events in DES\n", (int)(events_.size()));
+}
+
+bool DES::check_proc_curr_event(int _pid, int _t)
+{
+    for(std::list<Event*>::iterator it = events_.begin(); it != events_.end(); ++ it)
+    {
+        Event* evt = *it;
+        if(evt->timestamp_ > _t)
+            return false;
+        if(evt->proc_ptr_->pid_ == _pid)
+            return true;
+    }
+    return false;
 }
 
 void read_schedule_config(int _argc, char** _argv)
@@ -477,7 +572,13 @@ void read_schedule_config(int _argc, char** _argv)
             break;
         }
         case 'E':
+        {
+            sched_type = PREPRIO;
+            sscanf(param_str.substr(1).c_str(), "%d:%d", &quantum, &maxprio);
+            // printf("quantum: %d, maxprio: %d\n", quantum, maxprio);
+            sched_ptr = new PREPRIO_Scheduler(quantum, maxprio);
             break;
+        }
     }
 }
 
@@ -558,7 +659,20 @@ void Simulation()
                 // block/created -> ready 
                 proc_ptr -> dynamic_priority_ = proc_ptr-> static_priority_ - 1;
                 sched_ptr -> add_ready_process(proc_ptr);
-
+                
+                if(sched_type == PREPRIO)
+                {
+                    // check if current running process should be preempted
+                    if(curr_proc&&(curr_proc->dynamic_priority_) < (proc_ptr -> dynamic_priority_))
+                    {
+                        if(des->check_proc_curr_event(curr_proc->pid_, curr_time)==false)
+                        {
+                            // delete future events of curr proc, preempt current proc
+                            des -> rm_proc_event(curr_proc->pid_);
+                            des -> put_event(new Event(curr_time, curr_proc, TRANS_TO_PREEMPT));
+                        }
+                    }
+                }
                 // printf("ready process added\n");
                 break;
             }
@@ -730,6 +844,9 @@ void final_output()
             break;
         case PRIO:
             printf("PRIO %d\n", sched_ptr->quantum_);
+            break;
+        case PREPRIO:
+            printf("PREPRIO %d\n", sched_ptr->quantum_);
             break;
     }
     int last_finish_t=0;
