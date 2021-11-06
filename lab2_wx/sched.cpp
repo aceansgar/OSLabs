@@ -7,6 +7,7 @@
 #include <vector>
 #include <queue>
 #include <list>
+#include <stack>
 #include <fstream>
 #include <iostream>
 
@@ -42,7 +43,7 @@ class Scheduler
 {
 public:
     int quantum_;
-    std::queue<Process*> expired_queue_;
+    std::list<Process*> expired_list_;
     // std::vector<Process*> ready_list_, expire_list_;
     Scheduler(int _quantum);
     ~Scheduler();
@@ -55,9 +56,37 @@ public:
 class FCFS_Scheduler: public Scheduler
 {
 public:
+    std::queue<Process*> ready_queue_;
     FCFS_Scheduler(int _quantum);
     ~FCFS_Scheduler();
-    std::queue<Process*> ready_queue_;
+    void add_ready_process(Process* p);
+    Process* get_next_process();
+    // bool test_preempt(Process* p, int curtime);
+};
+
+class LCFS_Scheduler: public Scheduler
+{
+public:
+    std::stack<Process*> ready_stack_;
+    LCFS_Scheduler(int _quantum);
+    ~LCFS_Scheduler();
+    void add_ready_process(Process* p);
+    Process* get_next_process();
+    // bool test_preempt(Process* p, int curtime);
+};
+
+class SR_proc_comp 
+{
+public:
+    bool operator()(Process* _a, Process* _b){return (_a->cpu_t_remain_) > (_b->cpu_t_remain_);}
+};
+
+class SRTF_Scheduler: public Scheduler
+{
+public:
+    std::priority_queue<Process*, std::vector<Process*>, SR_proc_comp> ready_queue_;
+    SRTF_Scheduler(int _quantum);
+    ~SRTF_Scheduler();
     void add_ready_process(Process* p);
     Process* get_next_process();
     // bool test_preempt(Process* p, int curtime);
@@ -167,7 +196,20 @@ void Scheduler::add_ready_process(Process* _p)
 
 void Scheduler::add_expired_process(Process* _p)
 {
-    expired_queue_.push(_p);
+    if(expired_list_.empty())
+    {
+        expired_list_.push_back(_p);
+        return;
+    }
+    std::list<Process*>::iterator it;
+    int pid = _p->pid_;
+    for (it=expired_list_.begin(); it != expired_list_.end(); ++it)
+    {
+        int tmp_pid = (*it)->pid_;
+        if(pid < tmp_pid)
+            break;
+    }
+    expired_list_.insert(it, _p);
 }
 
 Process* Scheduler::get_next_process()
@@ -195,6 +237,54 @@ Process* FCFS_Scheduler::get_next_process()
     if(ready_queue_.empty())
         return NULL;
     Process* p = ready_queue_.front();
+    ready_queue_.pop();
+    return p;
+}
+
+LCFS_Scheduler::LCFS_Scheduler(int _quantum):Scheduler(_quantum)
+{
+
+}
+
+LCFS_Scheduler::~LCFS_Scheduler()
+{
+
+}
+
+void LCFS_Scheduler::add_ready_process(Process* _p)
+{
+    ready_stack_.push(_p);
+}
+
+Process* LCFS_Scheduler::get_next_process()
+{
+    if(ready_stack_.empty())
+        return NULL;
+    Process* p = ready_stack_.top();
+    ready_stack_.pop();
+    return p;
+}
+
+SRTF_Scheduler::SRTF_Scheduler(int _quantum):Scheduler(_quantum)
+{
+
+}
+
+SRTF_Scheduler::~SRTF_Scheduler()
+{
+
+}
+
+void SRTF_Scheduler::add_ready_process(Process* _p)
+{
+    ready_queue_.push(_p);
+}
+
+Process* SRTF_Scheduler::get_next_process()
+{
+    if(ready_queue_.empty())
+        return NULL;
+    Process* p = ready_queue_.top();
     ready_queue_.pop();
     return p;
 }
@@ -295,9 +385,11 @@ void read_schedule_config(int _argc, char** _argv)
             break;
         case 'L':
             sched_type = LCFS;
+            sched_ptr = new LCFS_Scheduler(DEFAULT_QUANTUM);
             break;
         case 'S':
             sched_type = SRTF;
+            sched_ptr = new SRTF_Scheduler(DEFAULT_QUANTUM);
             break;
         case 'R':
             sched_type = RR;
@@ -506,7 +598,7 @@ void Simulation()
             if_call_sched = false; // reset global flag
             if (curr_proc == NULL) 
             {
-                printf("to get next process from scheduler\n");
+                // printf("to get next process from scheduler\n");
                 curr_proc = sched_ptr->get_next_process();
                 if (curr_proc == NULL)
                     // no ready process at this time
@@ -546,11 +638,10 @@ void final_output()
     int sum_cw=0; //sum cpu waiting time
     int t_cpubusy = 0;
     int t_iobusy = des->iobusy_t_; 
-    while(!sched_ptr->expired_queue_.empty())
+    for(std::list<Process*>::iterator it = sched_ptr->expired_list_.begin(); it!=sched_ptr->expired_list_.end(); ++it)
     {
         ++ proc_num;
-        Process* p = (sched_ptr->expired_queue_).front();
-        sched_ptr -> expired_queue_.pop();
+        Process* p = *it;
         int pid = p->pid_;
         int AT = p->AT_;
         int TC = p->TC_;
