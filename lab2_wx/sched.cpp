@@ -392,10 +392,16 @@ void read_schedule_config(int _argc, char** _argv)
             sched_ptr = new SRTF_Scheduler(DEFAULT_QUANTUM);
             break;
         case 'R':
+        {
             sched_type = RR;
             quantum = atoi(param_str.substr(1).c_str());
+            // printf("quantum: %d\n",quantum);
+            sched_ptr = new FCFS_Scheduler(quantum);
             break;
+        }
         case 'P':
+            break;
+        case 'E':
             break;
     }
 }
@@ -612,26 +618,24 @@ void Simulation()
 
 void final_output()
 {
-    std::string sched_type_s;
     switch(sched_type)
     {
         case FCFS:
-            sched_type_s = "FCFS";
+            printf("FCFS\n");
             break;
         case LCFS:
-            sched_type_s = "LCFS";
+            printf("LCFS\n");
             break;
         case SRTF:
-            sched_type_s = "SRTF";
+            printf("SRTF\n");
             break;
         case RR:
-            sched_type_s = "RR";
+            printf("RR %d\n", sched_ptr->quantum_);
             break;
         case PRIO:
-            sched_type_s = "PRIO";
+            printf("PRIO\n");
             break;
     }
-    printf("%s\n", sched_type_s.c_str());
     int last_finish_t=0;
     int proc_num = 0;
     int sum_tt=0; //sum turn around time

@@ -1,0 +1,1 @@
+RR scheduler is FCFS object with non-default quantum
