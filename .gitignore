@@ -16,6 +16,7 @@ oslab2/*
 
 !oslab3/
 oslab3/*
+!oslab3/Makefile
 !oslab3/src
 oslab3/src/*
 !oslab3/src/*
