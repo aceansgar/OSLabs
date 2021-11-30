@@ -17,9 +17,4 @@ oslab2/*
 
 !oslab3/
 oslab3/*
-!oslab3/mmu.cpp
-!oslab3/manager.h
-!oslab3/manager.cpp
-!oslab3/myenv.h
-!oslab3/utils.h
-!oslab3/utils.cpp
+!oslab3/src/*
