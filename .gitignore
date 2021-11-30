@@ -12,8 +12,10 @@ oslab2/*
 !oslab2/sched.cpp
 !oslab2/Makefile
 !oslab2/README.txt
-!lab2os/tips.txt
+!oslab2/tips.txt
 
 !oslab3/
 oslab3/*
+!oslab3/src
+oslab3/src/*
 !oslab3/src/*
