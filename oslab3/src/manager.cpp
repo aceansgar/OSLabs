@@ -2,6 +2,9 @@
 
 frame_t frame_table[MAX_FRAME_NUM]; // only pager can access frame table
 bool output_option = false;
+Process* curr_proc;
+std::vector<Process*> processes;
+unsigned long long instr_i;
 
 Process::Process(unsigned _pid, unsigned _vma_num)
 {
@@ -215,6 +218,120 @@ unsigned FIFOPager::select_victim_frame()
     return frame_i;
 }
 
+RandomPager::RandomPager(unsigned _frame_num, unsigned _process_num, MyRand* _myrand): Pager(_frame_num, _process_num)
+{
+    m_myrand = _myrand;
+}
+
+RandomPager::~RandomPager()
+{
+
+}
+
+unsigned RandomPager::select_victim_frame()
+{
+    return m_myrand->myrandom();
+}
+
+ClockPager::ClockPager(unsigned _frame_num, unsigned _process_num): Pager(_frame_num, _process_num)
+{
+    m_handle_frame_i = 0;
+}
+
+ClockPager::~ClockPager()
+{
+
+}
+
+unsigned ClockPager::select_victim_frame()
+{
+    unsigned frame_i = m_handle_frame_i;
+    while(true)
+    {
+        unsigned pid = frame_table[frame_i].pid;
+        unsigned page_i = frame_table[frame_i].vpage_id;
+        if(processes[pid]->m_page_table[page_i].referenced)
+        {
+            // second chance
+            processes[pid]->m_page_table[page_i].referenced = 0;
+            frame_i = (frame_i + 1) % m_frame_num;
+        }
+        else
+            break;
+    }
+    m_handle_frame_i = (frame_i + 1) % m_frame_num;
+    // printf("victim frame selected: %u\n", frame_i);
+    return frame_i;
+}
+
+NRUPager::NRUPager(unsigned _frame_num, unsigned _process_num): Pager(_frame_num, _process_num)
+{
+    m_handle_frame_i = 0;
+    m_last_reset_instr_i = -1;
+}
+
+NRUPager::~NRUPager()
+{
+
+}
+
+unsigned NRUPager::select_victim_frame()
+{
+    // reset candidates of 4 classes to -1
+    for(unsigned i = 0; i < 4; ++ i)
+    {
+        m_candidate_frame_i_by_class[i] = -1;
+    }
+    bool reset = false;
+    if((int)instr_i - m_last_reset_instr_i >= 50)
+    {
+        reset = true;
+        m_last_reset_instr_i = instr_i;
+    }
+    int selected_frame_i = -1;
+    for(unsigned i = 0; i < m_frame_num; ++ i)
+    {
+        unsigned pid = frame_table[m_handle_frame_i].pid;
+        unsigned page_i = frame_table[m_handle_frame_i].vpage_id;
+        Process* proc = processes[pid];
+        unsigned class_i = proc->m_page_table[page_i].referenced * 2 + proc->m_page_table[page_i].modified;
+        if(class_i == 0)
+        {
+            if(selected_frame_i == -1)
+            {
+                // select this
+                selected_frame_i = m_handle_frame_i;
+                m_candidate_frame_i_by_class[0] = m_handle_frame_i;
+            }
+        }
+        else
+        {
+            if(m_candidate_frame_i_by_class[class_i] == -1)
+                m_candidate_frame_i_by_class[class_i] = m_handle_frame_i;
+        }
+        if(reset)
+        {
+            // printf("===== reset! \n");
+            proc->m_page_table[page_i].referenced = 0;
+        }
+        if(selected_frame_i != -1 && !reset)
+            break;
+        m_handle_frame_i = (m_handle_frame_i + 1) % m_frame_num;
+    }
+    for(unsigned class_i = 0; class_i < 4; ++ class_i)
+    {
+        int cand_frame_i = m_candidate_frame_i_by_class[class_i];
+        if(cand_frame_i != -1)
+        {
+            // select this
+            m_handle_frame_i = (cand_frame_i + 1) % m_frame_num;
+            return cand_frame_i;
+        }
+    }
+    fprintf(stderr, "error: must exist a candidate\n");
+    return -1;
+}
+
 /*
 * set configs, input object and rand object. 
 * create correspongding pager object
@@ -236,10 +353,13 @@ Simulator::Simulator(MyConfig* _myconfig, MyInput* _myinput, MyRand* _myrand)
             m_pager = new FIFOPager(m_frame_num, m_process_num);
             break;
         case RANDOM:
+            m_pager = new RandomPager(m_frame_num, m_process_exits, m_myrand);
             break;
         case CLOCK:
+            m_pager = new ClockPager(m_frame_num, m_process_num);
             break;
         case NRU:
+            m_pager = new NRUPager(m_frame_num, m_process_exits);
             break;
         case AGING:
             break;
@@ -265,10 +385,10 @@ Simulator::Simulator(MyConfig* _myconfig, MyInput* _myinput, MyRand* _myrand)
             proc -> m_vmas[vma_i].write_protected = m_myinput -> read_unsigned();
             proc -> m_vmas[vma_i].file_mapped = m_myinput -> read_unsigned();
         }
-        m_processes.push_back(proc);
+        processes.push_back(proc);
     }
 
-    m_curr_proc = NULL;
+    curr_proc = NULL;
 
     m_inst_count = 0;
     m_ctx_switches = 0;
@@ -285,7 +405,7 @@ void Simulator::simulate()
 {
     char operation;
     unsigned val;
-    unsigned long long instr_i = 0;
+    instr_i = 0;
     while (m_myinput -> get_next_instruction(&operation, &val)) 
     {
         if(output_option)
@@ -295,25 +415,25 @@ void Simulator::simulate()
             case 'c':
             {
                 ++ m_ctx_switches;
-                m_curr_proc = m_processes[val];
+                curr_proc = processes[val];
                 break;
             }
             case 'e':
             {
                 ++ m_process_exits;
-                m_curr_proc -> active = false;
+                curr_proc -> active = false;
                 if(output_option)
-                    printf("EXIT current process %u\n", m_curr_proc -> m_pid);
+                    printf("EXIT current process %u\n", curr_proc -> m_pid);
                 for(unsigned page_id = 0; page_id < PAGE_TABLE_SIZE; ++ page_id)
                 {
-                    if(m_curr_proc -> m_page_table[page_id].valid)
+                    if(curr_proc -> m_page_table[page_id].valid)
                     {
                         // unmap
-                        unsigned frame_i = m_curr_proc -> m_page_table[page_id].frame_id;
+                        unsigned frame_i = curr_proc -> m_page_table[page_id].frame_id;
                         unsigned evicted_frame_pid, evicted_frame_page_i;
                         m_pager -> unmap_frame(frame_i, &evicted_frame_pid, &evicted_frame_page_i);
                         m_pager -> put_frame_into_free_pool(frame_i);
-                        m_curr_proc -> check_unmap_on_exit_process(page_id); 
+                        curr_proc -> check_unmap_on_exit_process(page_id); 
                     }
                 }
                 break;
@@ -323,11 +443,11 @@ void Simulator::simulate()
                 ++ m_readwrites;
                 // printf("read/write instruction: \n");
                 unsigned page_i = val;
-                if(!m_curr_proc -> m_page_table[page_i].valid)
+                if(!curr_proc -> m_page_table[page_i].valid)
                 {
                     // printf("page fault\n");
                     // page fault, check if page is in a vma first
-                    if(m_curr_proc -> page_in_vmas(page_i))
+                    if(curr_proc -> page_in_vmas(page_i))
                     {
                         // printf("the page is in a VMA\n");
                         unsigned frame_i = m_pager -> get_frame(); // free frame or occupied frame
@@ -337,22 +457,22 @@ void Simulator::simulate()
                             // unmap, hardware has no access to frame table
                             unsigned evicted_frame_pid, evicted_frame_page_i;
                             m_pager -> unmap_frame(frame_i, &evicted_frame_pid, &evicted_frame_page_i);
-                            m_processes[evicted_frame_pid] -> check_unmap_during_process(evicted_frame_page_i);
+                            processes[evicted_frame_pid] -> check_unmap_during_process(evicted_frame_page_i);
                         }
-                        m_curr_proc -> check_map_during_process(page_i, frame_i);
-                        m_pager -> map_frame(frame_i, m_curr_proc -> m_pid, page_i);
+                        curr_proc -> check_map_during_process(page_i, frame_i);
+                        m_pager -> map_frame(frame_i, curr_proc -> m_pid, page_i);
                     }
                 }
                 // printf("PTE prepared\n");
                 // now the PTE has a corresponding frame prepared
                 if(operation == 'r')
                 {
-                    m_curr_proc -> read_page(page_i);
+                    curr_proc -> read_page(page_i);
                 }
                 else
                 {
                     // write
-                    m_curr_proc -> write_page(page_i);
+                    curr_proc -> write_page(page_i);
                 }
                 break;
             }
@@ -373,7 +493,7 @@ void Simulator::print_summary()
         for(int pid = 0; pid < m_process_num; ++ pid)
         {
             printf("PT[%u]:", pid);
-            Process* proc = m_processes[pid];
+            Process* proc = processes[pid];
             if(!proc -> active)
             {
                 for(int page_i = 0; page_i < PAGE_TABLE_SIZE; ++ page_i)
@@ -421,7 +541,7 @@ void Simulator::print_summary()
     {
         for(int pid = 0; pid < m_process_num; ++ pid)
         {
-            Process* proc = m_processes[pid];
+            Process* proc = processes[pid];
             printf("PROC[%d]: U=%llu M=%llu I=%llu O=%llu FI=%llu FO=%llu Z=%llu SV=%llu SP=%llu\n", \
             proc->m_pid, \
             proc->m_unmaps, proc->m_maps, proc->m_ins, proc->m_outs, \

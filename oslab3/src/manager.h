@@ -93,12 +93,33 @@ public:
     unsigned select_victim_frame();
 };
 
+class RandomPager: public Pager
+{
+public:
+    MyRand* m_myrand;
+    RandomPager(unsigned _frame_num, unsigned _process_num, MyRand* _myrand);
+    ~RandomPager();
+    unsigned select_victim_frame();
+};
+
 class ClockPager: public Pager
 {
 public:
     unsigned m_handle_frame_i;
     ClockPager(unsigned _frame_num, unsigned _process_num);
     ~ClockPager();
+    unsigned select_victim_frame();
+};
+
+// Algorithm "E", Enhanced Second Chance / NRU
+class NRUPager: public Pager
+{
+public:
+    unsigned m_handle_frame_i;
+    int m_last_reset_instr_i;
+    int m_candidate_frame_i_by_class[4]; // candidate for 4 classes, class id: 2*R + M 
+    NRUPager(unsigned _frame_num, unsigned _process_num);
+    ~NRUPager();
     unsigned select_victim_frame();
 };
 
@@ -111,8 +132,6 @@ private:
     MyInput* m_myinput;
     MyRand* m_myrand;
     Pager* m_pager;
-    std::vector<Process*> m_processes;
-    Process* m_curr_proc;
     unsigned long long m_inst_count;
     unsigned long long m_ctx_switches;
     unsigned long long m_process_exits;
