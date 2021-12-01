@@ -1,36 +1,26 @@
 CC = g++
-CFLAGS  = -g -Wall
 
-# typing 'make' will invoke the first target entry in the file 
-# (in this case the default target entry)
-# you can name this target entry anything, but "default" or "all"
-# are the most commonly used names by convention
-#
-default: count
+SDIR = src # source directory
+ODIR = ./objects
 
-# To create the executable file count we need the object files
-# countwords.o, counter.o, and scanner.o:
-#
-count:  countwords.o counter.o scanner.o 
-	$(CC) $(CFLAGS) -o count countwords.o counter.o scanner.o
+CFLAGS  = -I$(SDIR)
 
-# To create the object file countwords.o, we need the source
-# files countwords.c, scanner.h, and counter.h:
-#
-countwords.o:  countwords.c scanner.h counter.h 
-	$(CC) $(CFLAGS) -c countwords.c
+_DEPS = myenv.h utils.h manager.h
+DEPS = $(patsubst %, src/%,$(_DEPS))
 
-# To create the object file counter.o, we need the source files
-# counter.c and counter.h:
-#
-counter.o:  counter.c counter.h 
-	$(CC) $(CFLAGS) -c counter.c
+_OBJ = utils.o manager.o mmu.o
+OBJ = $(patsubst %, objects/%,$(_OBJ))
 
-# To create the object file scanner.o, we need the source files
-# scanner.c and scanner.h:
-#
-scanner.o:  scanner.c scanner.h 
-	$(CC) $(CFLAGS) -c scanner.c
+./objects/%.o : ./src/%.cpp $(DEPS)
+	$(CC) $(CFLAGS) -o $@ -c $< 
+
+mmu: $(OBJ)
+	$(CC) -o $@ $^ $(CFLAGS) 
+
+# mmu: $(OBJ)
+# 	$(CC) -o $@ $^ $(CFLAGS) 
+
+.PHONY: clean
 
 clean:
 	rm -f linker *~ *.o

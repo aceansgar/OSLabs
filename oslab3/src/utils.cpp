@@ -7,14 +7,20 @@ MyConfig::MyConfig(int _argc, char** _argv)
     m_frame_table_option = false; // F
     m_process_statistics_option = false; // S
     char c;
-    while ((c = getopt(_argc,_argv,"f:ao")) != -1 )
+    while ((c = getopt(_argc,_argv,"f:a:o:")) != -1 )
 	{
+        // printf("opt get : %c\n", c);
 		switch(c) 
         {
             case 'f': // frame num
+            {
+                // printf("case f, optarg: %s", optarg);
                 m_frame_num = atoi(optarg);
                 break;
+            }
             case 'a': // replacement policy
+            {
+                // printf("optarg: %s\n", optarg);
                 switch(optarg[0])
                 {
                     case 'f':
@@ -36,12 +42,14 @@ MyConfig::MyConfig(int _argc, char** _argv)
                         m_policy = WORKINGSET;
                         break;
                     default:
-                        std::cerr << 'invalid -a option' << std::endl;
+                        fprintf(stderr, "invalid -a option\n");
                         break;
                 }
                 break;
+            }
             case 'o':
-                int opt_num = len(optarg);
+            {
+                int opt_num = strlen(optarg);
                 for(int i = 0; i < opt_num; ++ i)
                 {
                     switch(optarg[i])
@@ -62,6 +70,7 @@ MyConfig::MyConfig(int _argc, char** _argv)
                     }
                 }
                 break;
+            }
             default:
                 break;
 		}
@@ -104,6 +113,7 @@ char* MyInput::read_token()
         if(!token_p)
             m_newline = true;      
     }
+    // printf("a token read: %s\n",token_p);
     return token_p;
 }
 

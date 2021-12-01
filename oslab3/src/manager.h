@@ -35,8 +35,6 @@ struct vma_t
     unsigned int file_mapped: 1;
 };
 
-frame_t frame_table[MAX_FRAME_NUM]; // only pager can access frame table
-
 class Process
 {
 public:
@@ -54,6 +52,7 @@ public:
     unsigned long long m_zeros;
     unsigned long long m_segvs;
     unsigned long long m_segprots;
+    bool active;
     Process(unsigned _pid, unsigned _vma_num);
     bool page_in_vmas(unsigned _page_i);
     // check if FOUT
@@ -75,11 +74,14 @@ public:
     std::queue<unsigned> m_free_frame_id_pool;
     Pager(unsigned _frame_num, unsigned _process_num);
     ~Pager();
-    void unmap_frame(unsigned _frame_i);
+    // if unmap when exit, then call this to put frame into free pool
+    void put_frame_into_free_pool(unsigned _frame_i);
+    void unmap_frame(unsigned _frame_i, unsigned* _evicted_frame_pid, unsigned* _evicted_frame_page_i);
     void map_frame(unsigned _frame_i, unsigned _pid, unsigned _page_i);
     virtual unsigned select_victim_frame() = 0; 
     unsigned get_frame(); // select a free frame or a victim otherwise
     bool is_occupied_frame(unsigned _frame_i);
+    void print_frame_table(); // for F option
 };
 
 class FIFOPager: public Pager
@@ -88,6 +90,15 @@ public:
     unsigned m_handle_frame_i;
     FIFOPager(unsigned _frame_num, unsigned _process_num);
     ~FIFOPager();
+    unsigned select_victim_frame();
+};
+
+class ClockPager: public Pager
+{
+public:
+    unsigned m_handle_frame_i;
+    ClockPager(unsigned _frame_num, unsigned _process_num);
+    ~ClockPager();
     unsigned select_victim_frame();
 };
 
@@ -105,6 +116,7 @@ private:
     unsigned long long m_inst_count;
     unsigned long long m_ctx_switches;
     unsigned long long m_process_exits;
+    unsigned long long m_readwrites;
 public:
     Simulator(MyConfig* _myconfig, MyInput* _myinput, MyRand* _myrand);
     ~Simulator();
