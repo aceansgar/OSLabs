@@ -24,6 +24,7 @@ struct frame_t
     unsigned int pid:MAX_PROCESS_NUM_LOG2; // reverse mapping to process id
     unsigned int vpage_id:PAGE_TABLE_SIZE_LOG2; // reverse mapping to page id in page table
     unsigned int occupied:1;
+    // unsigned int age_set:1;
 };
 
 // VMA
@@ -77,6 +78,7 @@ public:
     // if unmap when exit, then call this to put frame into free pool
     void put_frame_into_free_pool(unsigned _frame_i);
     void unmap_frame(unsigned _frame_i, unsigned* _evicted_frame_pid, unsigned* _evicted_frame_page_i);
+    virtual void set_frame_config_on_map(unsigned _frame_i) = 0;
     void map_frame(unsigned _frame_i, unsigned _pid, unsigned _page_i);
     virtual unsigned select_victim_frame() = 0; 
     unsigned get_frame(); // select a free frame or a victim otherwise
@@ -91,6 +93,7 @@ public:
     FIFOPager(unsigned _frame_num, unsigned _process_num);
     ~FIFOPager();
     unsigned select_victim_frame();
+    void set_frame_config_on_map(unsigned _frame_i);
 };
 
 class RandomPager: public Pager
@@ -100,6 +103,7 @@ public:
     RandomPager(unsigned _frame_num, unsigned _process_num, MyRand* _myrand);
     ~RandomPager();
     unsigned select_victim_frame();
+    void set_frame_config_on_map(unsigned _frame_i);
 };
 
 class ClockPager: public Pager
@@ -109,6 +113,7 @@ public:
     ClockPager(unsigned _frame_num, unsigned _process_num);
     ~ClockPager();
     unsigned select_victim_frame();
+    void set_frame_config_on_map(unsigned _frame_i);
 };
 
 // Algorithm "E", Enhanced Second Chance / NRU
@@ -121,6 +126,30 @@ public:
     NRUPager(unsigned _frame_num, unsigned _process_num);
     ~NRUPager();
     unsigned select_victim_frame();
+    void set_frame_config_on_map(unsigned _frame_i);
+};
+
+class AgingPager: public Pager
+{
+public:
+    unsigned m_handle_frame_i;
+    unsigned m_ages[MAX_FRAME_NUM];
+    AgingPager(unsigned _frame_num, unsigned _process_num);
+    ~AgingPager();
+    void update_age(unsigned _frame_i);
+    unsigned select_victim_frame();
+    void set_frame_config_on_map(unsigned _frame_i);
+};
+
+class WorkingSetPager: public Pager
+{
+public:
+    unsigned m_handle_frame_i;
+    unsigned long long m_last_mapped_time_list[MAX_FRAME_NUM];
+    WorkingSetPager(unsigned _frame_num, unsigned _process_num);
+    ~WorkingSetPager();
+    unsigned select_victim_frame();
+    void set_frame_config_on_map(unsigned _frame_i);
 };
 
 class Simulator

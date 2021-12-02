@@ -165,6 +165,7 @@ void Pager::map_frame(unsigned _frame_i, unsigned _pid, unsigned _page_i)
     // set reverse mapping to page table
     frame_table[_frame_i].pid = _pid;
     frame_table[_frame_i].vpage_id = _page_i;
+    set_frame_config_on_map(_frame_i);
 }
 
 unsigned Pager::get_frame()
@@ -218,6 +219,11 @@ unsigned FIFOPager::select_victim_frame()
     return frame_i;
 }
 
+void FIFOPager::set_frame_config_on_map(unsigned _frame_i)
+{
+
+}
+
 RandomPager::RandomPager(unsigned _frame_num, unsigned _process_num, MyRand* _myrand): Pager(_frame_num, _process_num)
 {
     m_myrand = _myrand;
@@ -231,6 +237,11 @@ RandomPager::~RandomPager()
 unsigned RandomPager::select_victim_frame()
 {
     return m_myrand->myrandom();
+}
+
+void RandomPager::set_frame_config_on_map(unsigned _frame_i)
+{
+    
 }
 
 ClockPager::ClockPager(unsigned _frame_num, unsigned _process_num): Pager(_frame_num, _process_num)
@@ -262,6 +273,11 @@ unsigned ClockPager::select_victim_frame()
     m_handle_frame_i = (frame_i + 1) % m_frame_num;
     // printf("victim frame selected: %u\n", frame_i);
     return frame_i;
+}
+
+void ClockPager::set_frame_config_on_map(unsigned _frame_i)
+{
+    
 }
 
 NRUPager::NRUPager(unsigned _frame_num, unsigned _process_num): Pager(_frame_num, _process_num)
@@ -332,6 +348,117 @@ unsigned NRUPager::select_victim_frame()
     return -1;
 }
 
+void NRUPager::set_frame_config_on_map(unsigned _frame_i)
+{
+    
+}
+
+AgingPager::AgingPager(unsigned _frame_num, unsigned _process_num): Pager(_frame_num, _process_num)
+{
+    m_handle_frame_i = 0;
+    memset(m_ages, 0, m_frame_num * sizeof(unsigned));
+}
+
+AgingPager::~AgingPager()
+{
+
+}
+
+void AgingPager::update_age(unsigned _frame_i)
+{
+    unsigned pid = frame_table[_frame_i].pid;
+    unsigned page_i = frame_table[_frame_i].vpage_id;
+    unsigned referenced = processes[pid]->m_page_table[page_i].referenced;
+    // printf("referenced: %u\n", referenced);
+    processes[pid]->m_page_table[page_i].referenced = 0;
+    // printf("====== frame %u prev age: %x, referenced: %u\n", _frame_i, m_ages[_frame_i], referenced);
+    unsigned new_age = (m_ages[_frame_i] >> 1) + (referenced << 31);
+    m_ages[_frame_i] = new_age;
+    // if(instr_i == 83)
+    // printf("====== frame %u new age: %x\n", _frame_i, new_age);
+}
+
+unsigned AgingPager::select_victim_frame()
+{
+    unsigned frame_cnt = 0;
+    unsigned min_age = ~(unsigned)0;
+    unsigned selected_frame_i = m_handle_frame_i;
+    while(true)
+    {
+        update_age(m_handle_frame_i);
+        if(m_ages[m_handle_frame_i] < min_age)
+        {
+            min_age = m_ages[m_handle_frame_i];
+            selected_frame_i = m_handle_frame_i;
+        }
+        m_handle_frame_i = (m_handle_frame_i + 1) % m_frame_num;
+        ++ frame_cnt;
+        if(frame_cnt == m_frame_num)
+            break;
+    }
+    m_handle_frame_i = (selected_frame_i + 1) % m_frame_num;
+    return selected_frame_i;
+}
+
+void AgingPager::set_frame_config_on_map(unsigned _frame_i)
+{
+    m_ages[_frame_i] = 0;
+}
+
+WorkingSetPager::WorkingSetPager(unsigned _frame_num, unsigned _process_num): Pager(_frame_num, _process_num)
+{
+    m_handle_frame_i = 0;
+    memset(m_last_mapped_time_list, 0, m_frame_num * sizeof(unsigned long long));   
+}
+
+WorkingSetPager::~WorkingSetPager()
+{
+
+}
+
+unsigned WorkingSetPager::select_victim_frame()
+{
+    unsigned long long oldest_last_used_time = instr_i;
+    unsigned oldest_frame_i = m_handle_frame_i;
+    bool victim_found = false;
+    unsigned victim_frame_i;
+    for(unsigned i = 0; i < m_frame_num; ++ i)
+    {
+        unsigned pid = frame_table[m_handle_frame_i].pid;
+        unsigned page_i = frame_table[m_handle_frame_i].vpage_id;
+        unsigned referenced = processes[pid]->m_page_table[page_i].referenced;
+        if(referenced)
+        {
+            m_last_mapped_time_list[m_handle_frame_i] = instr_i;
+            processes[pid]->m_page_table[page_i].referenced = 0;
+        }
+        else if(instr_i - m_last_mapped_time_list[m_handle_frame_i] > 49)
+        {
+            victim_found = true;
+            victim_frame_i = m_handle_frame_i;
+            break;
+        }
+        if(m_last_mapped_time_list[m_handle_frame_i] < oldest_last_used_time)
+        {
+            oldest_last_used_time = m_last_mapped_time_list[m_handle_frame_i];
+            oldest_frame_i = m_handle_frame_i;
+        }
+        m_handle_frame_i = (m_handle_frame_i + 1) % m_frame_num;
+    }
+    if(!victim_found)
+        victim_frame_i = oldest_frame_i;
+    m_handle_frame_i = (victim_frame_i + 1) % m_frame_num;
+    return victim_frame_i;
+}
+
+void WorkingSetPager::set_frame_config_on_map(unsigned _frame_i)
+{
+    m_last_mapped_time_list[_frame_i] = instr_i;
+}
+
+
+
+
 /*
 * set configs, input object and rand object. 
 * create correspongding pager object
@@ -353,17 +480,19 @@ Simulator::Simulator(MyConfig* _myconfig, MyInput* _myinput, MyRand* _myrand)
             m_pager = new FIFOPager(m_frame_num, m_process_num);
             break;
         case RANDOM:
-            m_pager = new RandomPager(m_frame_num, m_process_exits, m_myrand);
+            m_pager = new RandomPager(m_frame_num, m_process_num, m_myrand);
             break;
         case CLOCK:
             m_pager = new ClockPager(m_frame_num, m_process_num);
             break;
         case NRU:
-            m_pager = new NRUPager(m_frame_num, m_process_exits);
+            m_pager = new NRUPager(m_frame_num, m_process_num);
             break;
         case AGING:
+            m_pager = new AgingPager(m_frame_num, m_process_num);
             break;
         case WORKINGSET:
+            m_pager = new WorkingSetPager(m_frame_num, m_process_num);
             break;
         default:
             fprintf(stderr, "no Pager class for this policy \n");
@@ -480,6 +609,7 @@ void Simulator::simulate()
                 fprintf(stderr, "wrong operation\n");
                 break;
         }
+        // printf("referenced of page 3: %u\n", processes[0]->m_page_table[3].referenced);
         ++ instr_i;
     }
     m_inst_count = instr_i;
