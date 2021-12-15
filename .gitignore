@@ -21,3 +21,11 @@ oslab3/*
 !oslab3/src
 oslab3/src/*
 !oslab3/src/*
+
+!oslab4/
+oslab4/*
+!oslab4/Makefile
+!oslab4/readme.txt
+!oslab4/src
+oslab4/src/*
+!oslab4/src/*
