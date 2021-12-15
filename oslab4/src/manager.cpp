@@ -236,57 +236,91 @@ FLOOKScheduler::FLOOKScheduler(): Scheduler()
 
 }
 
-CLOOKScheduler::~CLOOKScheduler()
+FLOOKScheduler::~FLOOKScheduler()
 {
 
 }
 
-void CLOOKScheduler::add_req(Request* _req)
+void FLOOKScheduler::add_req(Request* _req)
 {
     // insert in order
-    if(m_pending_reqs.empty())
+    if(m_prepare_reqs.empty())
     {
-        m_pending_reqs.push_back(_req);
+        m_prepare_reqs.push_back(_req);
         return;
     }
     std::list<Request*>::iterator it;
-    for(it = m_pending_reqs.begin(); it != m_pending_reqs.end(); ++ it)
+    for(it = m_prepare_reqs.begin(); it != m_prepare_reqs.end(); ++ it)
     {
         Request* req = *it;
         if(req->m_track > _req->m_track)
             break;
     }
-    m_pending_reqs.insert(it, _req);
+    m_prepare_reqs.insert(it, _req);
 }
 
-bool CLOOKScheduler::exist_pending_reqs()
+bool FLOOKScheduler::exist_pending_reqs()
 {
+    if(m_pending_reqs.empty())
+    {
+        m_pending_reqs = m_prepare_reqs;
+        m_prepare_reqs = std::list<Request*>();
+    }
     return !m_pending_reqs.empty();
 }
 
-Request* CLOOKScheduler::get_next_req(int _curr_track)
+Request* FLOOKScheduler::get_next_req(int _curr_track)
 {
     std::list<Request*>::iterator it;
-    for(it = m_pending_reqs.begin(); it != m_pending_reqs.end(); ++ it)
+    if(curr_direction) // to right
     {
-        Request* req = *it;
-        if(req->m_track >= _curr_track)
-            break;
+        for(it = m_pending_reqs.begin(); it != m_pending_reqs.end(); ++ it)
+        {
+            Request* req = *it;
+            if(req->m_track >= _curr_track)
+                break;
+        }
+        if(it == m_pending_reqs.end()) // no reqs on the right
+        {
+            curr_direction = false; // change direction to left
+            return get_next_req(_curr_track);
+        }
+        else
+        {
+            // found
+            Request* req = *it;
+            m_pending_reqs.erase(it);
+            return req;
+        }
     }
-    if(it == m_pending_reqs.end()) // no reqs on the right
+    else // to left
     {
-        // jump to leftmost
-        Request* req = *(m_pending_reqs.begin());
-        m_pending_reqs.erase(m_pending_reqs.begin());
-        return req;
+        for(it = m_pending_reqs.begin(); it != m_pending_reqs.end(); ++ it)
+        {
+            Request* req = *it;
+            if(req->m_track > _curr_track)
+                break;
+        }
+        if(it == m_pending_reqs.begin()) // no reqs on the left
+        {
+            curr_direction = true; // change direction to right
+            return get_next_req(_curr_track);
+        }
+        -- it; // the rightmost iterator of selected track
+        int track_selected = (*it)->m_track;
+        // find the leftmost iterator of selected track
+        for(std::list<Request*>::iterator iter = m_pending_reqs.begin(); iter != m_pending_reqs.end(); ++ iter)
+        {
+            Request* req = *iter;
+            if(req->m_track == track_selected)
+            {
+                m_pending_reqs.erase(iter);
+                return req;
+            }
+        }
+        fprintf(stderr, "error in get_next_req");
+        return NULL;
     }
-    else
-    {
-        // found
-        Request* req = *it;
-        m_pending_reqs.erase(it);
-        return req;
-    } 
 }
 
 
@@ -313,6 +347,11 @@ Simulator::Simulator(MyInput* _myinput, policy_t _policy)
         case CLOOK:
         {
             m_scheduler = new CLOOKScheduler;
+            break;
+        }
+        case FLOOK:
+        {
+            m_scheduler = new FLOOKScheduler;
             break;
         }
         default:
